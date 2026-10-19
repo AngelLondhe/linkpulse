@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
 
     # Caching / click pipeline
+    link_cache_enabled: bool = True  # false = every redirect hits Postgres (benchmarking)
     link_cache_ttl_seconds: int = 3600
     stats_cache_ttl_seconds: int = 60
     click_queue_key: str = "clicks:queue"

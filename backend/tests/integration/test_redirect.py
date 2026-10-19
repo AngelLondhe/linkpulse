@@ -229,3 +229,19 @@ async def test_redirect_still_works_when_click_cannot_be_queued(
     response = await client.get(f"/{link['short_code']}")
 
     assert response.status_code == 302
+
+
+async def test_cache_can_be_disabled(
+    client: AsyncClient, auth_headers: dict[str, str], redis: Redis
+) -> None:
+    link = await _create(client, auth_headers, "https://example.com/uncached")
+    settings = get_settings()
+    settings.link_cache_enabled = False
+    try:
+        response = await client.get(f"/{link['short_code']}")
+        await client.get("/NoSuchCode")
+    finally:
+        settings.link_cache_enabled = True
+
+    assert response.status_code == 302
+    assert await redis.exists(cache_key(str(link["short_code"])), cache_key("NoSuchCode")) == 0

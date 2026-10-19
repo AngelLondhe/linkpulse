@@ -63,4 +63,5 @@ concurrency = ["thread", "greenlet"]  # SQLAlchemy async switches greenlets; tra
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+fail_under = 80
 exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]

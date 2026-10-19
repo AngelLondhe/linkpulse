@@ -61,6 +61,8 @@ def cache_key(code: str) -> str:
 
 async def get(redis: Redis, code: str) -> CachedLink | Missing | None:
     """Return the cached link, MISSING for a cached "not found", or None on a miss/error."""
+    if not get_settings().link_cache_enabled:
+        return None
     try:
         raw = await redis.get(cache_key(code))
     except (RedisError, OSError):
@@ -87,6 +89,8 @@ def _ttl_for(entry: CachedLink, now: datetime) -> int:
 
 
 async def store(redis: Redis, code: str, entry: CachedLink) -> None:
+    if not get_settings().link_cache_enabled:
+        return
     try:
         await redis.set(
             cache_key(code), json.dumps(asdict(entry)), ex=_ttl_for(entry, datetime.now(UTC))
@@ -96,6 +100,8 @@ async def store(redis: Redis, code: str, entry: CachedLink) -> None:
 
 
 async def store_missing(redis: Redis, code: str) -> None:
+    if not get_settings().link_cache_enabled:
+        return
     try:
         await redis.set(cache_key(code), MISSING_MARKER, ex=NEGATIVE_TTL_SECONDS)
     except (RedisError, OSError):
