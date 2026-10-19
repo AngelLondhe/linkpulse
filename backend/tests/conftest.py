@@ -28,9 +28,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis import redis_client
+from app.core.security import create_access_token
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.main import app
+from app.models import User
+from app.services.auth_service import register_user
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -73,3 +76,25 @@ async def client() -> AsyncIterator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as http:
         yield http
+
+
+DEFAULT_PASSWORD = "correct-horse-battery"
+
+
+@pytest.fixture
+async def user(db: AsyncSession) -> User:
+    return await register_user(db, "alice@example.com", DEFAULT_PASSWORD)
+
+
+@pytest.fixture
+async def other_user(db: AsyncSession) -> User:
+    return await register_user(db, "mallory@example.com", DEFAULT_PASSWORD)
+
+
+def bearer(user: User) -> dict[str, str]:
+    return {"Authorization": f"Bearer {create_access_token(user.id).token}"}
+
+
+@pytest.fixture
+def auth_headers(user: User) -> dict[str, str]:
+    return bearer(user)

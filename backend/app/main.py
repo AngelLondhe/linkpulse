@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.redis import redis_client
 from app.db.session import engine
-from app.routers import health
+from app.routers import auth, health
 
 
 @asynccontextmanager
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
     )
     register_exception_handlers(app)
     app.include_router(health.router)
+    app.include_router(auth.router)
     return app
 
 

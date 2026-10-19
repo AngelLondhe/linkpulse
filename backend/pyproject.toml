@@ -54,6 +54,7 @@ filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]
 [tool.coverage.run]
 source = ["app"]
 branch = true
+concurrency = ["thread", "greenlet"]  # SQLAlchemy async switches greenlets; trace across them
 
 [tool.coverage.report]
 show_missing = true
