@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import GoneError, NotFoundError
+from app.core.security import burn_password_check, verify_password
 from app.models import Link
 from app.services import click_limits, click_queue, link_cache
 from app.services.click_queue import ClickEvent
@@ -108,3 +109,13 @@ async def record_click(
     )
     queued = await click_queue.enqueue(redis, event)
     return None if queued else event
+
+
+async def check_link_password(db: AsyncSession, entry: CachedLink, password: str) -> bool:
+    """Verify a visitor's password against the link's Argon2 hash (read from Postgres; hashes
+    are never cached in Redis)."""
+    password_hash = await db.scalar(select(Link.password_hash).where(Link.id == entry.id))
+    if password_hash is None:
+        burn_password_check(password)
+        return False
+    return verify_password(password, password_hash)

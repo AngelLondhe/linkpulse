@@ -17,6 +17,7 @@ from app.core.errors import (
     ServiceUnavailableError,
     ValidationError,
 )
+from app.core.security import hash_password
 from app.models import Click, Link, User
 from app.schemas.links import LinkCreate, LinkUpdate
 from app.services import click_limits, link_cache
@@ -76,6 +77,7 @@ async def create_link(db: AsyncSession, redis: Redis, owner: User, data: LinkCre
     """
     destination = validate_destination(data.url)
     expires_at = _validated_expiry(data.expires_at)
+    password_hash = hash_password(data.password) if data.password is not None else None
     # Read before any rollback: a rollback expires every object in the session, incl. `owner`.
     owner_id = owner.id
 
@@ -87,6 +89,7 @@ async def create_link(db: AsyncSession, redis: Redis, owner: User, data: LinkCre
             is_custom=is_custom,
             expires_at=expires_at,
             max_clicks=data.max_clicks,
+            password_hash=password_hash,
         )
 
     if data.custom_alias is not None:
@@ -192,6 +195,8 @@ async def update_link(
         link.expires_at = _validated_expiry(changes.expires_at)
     if "max_clicks" in provided:
         link.max_clicks = changes.max_clicks
+    if "password" in provided:
+        link.password_hash = hash_password(changes.password) if changes.password else None
     await db.commit()
     await db.refresh(link)
     await link_cache.invalidate(redis, link.short_code)

@@ -19,15 +19,19 @@ class LinkCreate(BaseModel):
         default=None, description="Link stops working at this instant (must include a TZ)"
     )
     max_clicks: int | None = Field(default=None, ge=1, le=1_000_000_000)
+    password: str | None = Field(
+        default=None, min_length=4, max_length=128, description="Visitors must enter it first"
+    )
 
 
 class LinkUpdate(BaseModel):
-    """Partial update. For expires_at / max_clicks an explicit null clears the limit."""
+    """Partial update. For expires_at / max_clicks / password an explicit null removes it."""
 
     url: str | None = Field(default=None, min_length=1, max_length=MAX_URL_LENGTH)
     is_active: bool | None = None
     expires_at: AwareDatetime | None = None
     max_clicks: int | None = Field(default=None, ge=1, le=1_000_000_000)
+    password: str | None = Field(default=None, min_length=4, max_length=128)
 
     @model_validator(mode="after")
     def _at_least_one_field(self) -> "LinkUpdate":
