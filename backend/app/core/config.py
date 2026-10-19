@@ -1,5 +1,6 @@
 """Application settings, loaded from environment variables (and an optional .env file)."""
 
+import ipaddress
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -51,6 +52,13 @@ class Settings(BaseSettings):
         """Accept comma-separated strings so lists are easy to set in hosting dashboards."""
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("trusted_proxies")
+    @classmethod
+    def _validate_proxies(cls, value: list[str]) -> list[str]:
+        for entry in value:
+            ipaddress.ip_network(entry, strict=False)  # raises ValueError on bad IP/CIDR
         return value
 
     @field_validator("cors_origins")

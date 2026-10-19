@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.redis import redis_client
 from app.db.session import engine
-from app.routers import auth, health, links
+from app.routers import auth, health, links, redirect
 
 
 @asynccontextmanager
@@ -40,6 +40,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(links.router)
+    # Catch-all /{short_code} must be registered last so it never shadows /api or /docs.
+    app.include_router(redirect.router)
     return app
 
 

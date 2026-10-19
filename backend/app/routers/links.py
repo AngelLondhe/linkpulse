@@ -1,9 +1,11 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Response, status
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.redis import get_redis
 from app.db.session import get_db
 from app.models import User
 from app.routers.deps import get_current_user
@@ -24,8 +26,9 @@ async def create_link(
     body: LinkCreate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> LinkRead:
-    link = await links_service.create_link(db, user, body.url)
+    link = await links_service.create_link(db, redis, user, body.url)
     return LinkRead.from_model(link, total_clicks=0, base_url=_base_url())
 
 
@@ -67,8 +70,9 @@ async def update_link(
     body: LinkUpdate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> LinkRead:
-    link = await links_service.update_link(db, user, link_id, body)
+    link = await links_service.update_link(db, redis, user, link_id, body)
     clicks = await links_service.count_clicks(db, link.id)
     return LinkRead.from_model(link, total_clicks=clicks, base_url=_base_url())
 
@@ -78,6 +82,7 @@ async def delete_link(
     link_id: LinkId,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> Response:
-    await links_service.delete_link(db, user, link_id)
+    await links_service.delete_link(db, redis, user, link_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

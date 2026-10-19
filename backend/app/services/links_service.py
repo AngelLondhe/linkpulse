@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Sequence
 
+from redis.asyncio import Redis
 from sqlalchemy import ScalarSelect, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,7 @@ from app.core.errors import (
 )
 from app.models import Click, Link, User
 from app.schemas.links import LinkUpdate
+from app.services import link_cache
 from app.utils.db_errors import is_unique_violation
 from app.utils.shortcode import generate_short_code
 from app.utils.url_validation import InvalidURLError, own_hosts_from_urls, validate_target_url
@@ -38,7 +40,7 @@ def validate_destination(url: str) -> str:
         raise ValidationError(str(exc), code="invalid_url") from exc
 
 
-async def create_link(db: AsyncSession, owner: User, url: str) -> Link:
+async def create_link(db: AsyncSession, redis: Redis, owner: User, url: str) -> Link:
     """Create a link with a random 7-char Base62 code.
 
     Collisions are handled optimistically: insert, and if the unique index on ``short_code``
@@ -65,6 +67,7 @@ async def create_link(db: AsyncSession, owner: User, url: str) -> Link:
             logger.warning("Short code collision on attempt %d/%d", attempt, MAX_CODE_ATTEMPTS)
             continue
         await db.refresh(link)
+        await link_cache.invalidate(redis, link.short_code)  # drop any negative-cache entry
         return link
 
     raise ServiceUnavailableError(
@@ -132,8 +135,11 @@ async def count_clicks(db: AsyncSession, link_id: int) -> int:
     return await db.scalar(select(func.count(Click.id)).where(Click.link_id == link_id)) or 0
 
 
-async def update_link(db: AsyncSession, owner: User, link_id: int, changes: LinkUpdate) -> Link:
-    """Apply a partial update to an owned link (destination URL and/or active flag)."""
+async def update_link(
+    db: AsyncSession, redis: Redis, owner: User, link_id: int, changes: LinkUpdate
+) -> Link:
+    """Apply a partial update to an owned link (destination URL and/or active flag), then
+    invalidate its cached redirect entry so the change takes effect immediately."""
     link = await get_owned_link(db, owner, link_id)
     if changes.url is not None:
         link.original_url = validate_destination(changes.url)
@@ -141,11 +147,14 @@ async def update_link(db: AsyncSession, owner: User, link_id: int, changes: Link
         link.is_active = changes.is_active
     await db.commit()
     await db.refresh(link)
+    await link_cache.invalidate(redis, link.short_code)
     return link
 
 
-async def delete_link(db: AsyncSession, owner: User, link_id: int) -> None:
-    """Delete an owned link; its clicks are removed by ON DELETE CASCADE."""
+async def delete_link(db: AsyncSession, redis: Redis, owner: User, link_id: int) -> None:
+    """Delete an owned link (clicks go via ON DELETE CASCADE) and evict it from the cache."""
     link = await get_owned_link(db, owner, link_id)
+    code = link.short_code
     await db.delete(link)
     await db.commit()
+    await link_cache.invalidate(redis, code)
