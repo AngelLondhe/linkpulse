@@ -9,10 +9,10 @@ from app.core.config import get_settings
 from app.core.redis import get_redis
 from app.db.session import get_db
 from app.models import User
-from app.routers.deps import get_current_user
+from app.routers.deps import get_current_user, rate_limit_per_user
 from app.schemas.links import LinkCreate, LinkPage, LinkRead, LinkUpdate
 from app.schemas.stats import LinkStats
-from app.services import links_service, qr_service, stats_service
+from app.services import links_service, qr_service, rate_limiter, stats_service
 
 router = APIRouter(prefix="/api/links", tags=["links"])
 
@@ -23,7 +23,12 @@ def _base_url() -> str:
     return str(get_settings().public_base_url)
 
 
-@router.post("", response_model=LinkRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=LinkRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_per_user(rate_limiter.CREATE_LINK))],
+)
 async def create_link(
     body: LinkCreate,
     user: User = Depends(get_current_user),

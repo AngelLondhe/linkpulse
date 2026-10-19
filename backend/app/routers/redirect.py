@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis import get_redis
 from app.db.session import get_db
-from app.routers.deps import get_client_ip
-from app.services import click_processing, redirect_service
+from app.routers.deps import get_client_ip, rate_limit
+from app.services import click_processing, rate_limiter, redirect_service
 from app.services.link_cache import CachedLink
 from app.utils.bots import looks_like_bot
 from app.utils.unlock_page import SECURITY_HEADERS, render_unlock_page
@@ -51,11 +51,13 @@ async def _complete_visit(
 @router.get(
     "/{short_code}",
     status_code=status.HTTP_302_FOUND,
+    dependencies=[Depends(rate_limit(rate_limiter.REDIRECT))],
     response_class=RedirectResponse,
     responses={
         200: {"description": "Password form (protected links)", "content": {"text/html": {}}},
         404: {"description": "Unknown or inactive link"},
         410: {"description": "Expired or click limit reached"},
+        429: {"description": "Too many requests from this IP"},
     },
 )
 async def follow_short_link(
@@ -88,6 +90,8 @@ async def follow_short_link(
     "/{short_code}",
     response_class=RedirectResponse,
     include_in_schema=False,
+    # Brute-force protection: few password attempts per IP per link.
+    dependencies=[Depends(rate_limit(rate_limiter.UNLOCK, per="ip_and_path"))],
 )
 async def unlock_short_link(
     short_code: str,

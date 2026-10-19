@@ -4,9 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import create_access_token
 from app.db.session import get_db
 from app.models import User
-from app.routers.deps import get_current_user
+from app.routers.deps import get_current_user, rate_limit
 from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, UserRead
-from app.services import auth_service
+from app.services import auth_service, rate_limiter
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -20,13 +20,22 @@ def _auth_response(user: User) -> AuthResponse:
     )
 
 
-@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=AuthResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit(rate_limiter.REGISTER))],
+)
 async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
     user = await auth_service.register_user(db, body.email, body.password)
     return _auth_response(user)
 
 
-@router.post("/login", response_model=AuthResponse)
+@router.post(
+    "/login",
+    response_model=AuthResponse,
+    dependencies=[Depends(rate_limit(rate_limiter.LOGIN))],
+)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
     user = await auth_service.authenticate_user(db, body.email, body.password)
     return _auth_response(user)

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     trusted_proxies: Annotated[list[str], NoDecode] = []
 
+    # Rate limiting (Redis sliding window; rules in app/services/rate_limiter.py)
+    rate_limit_enabled: bool = True
+
     # Caching / click pipeline
     link_cache_ttl_seconds: int = 3600
     stats_cache_ttl_seconds: int = 60
