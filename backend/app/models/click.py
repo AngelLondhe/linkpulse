@@ -1,6 +1,7 @@
+import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -17,6 +18,11 @@ class Click(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    # Idempotency key generated on the redirect path. The worker inserts with
+    # ON CONFLICT (event_id) DO NOTHING, so re-processing a batch never double-counts.
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, unique=True, server_default=text("gen_random_uuid()")
+    )
     link_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("links.id", ondelete="CASCADE"))
     clicked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     referrer: Mapped[str | None] = mapped_column(String(2048))

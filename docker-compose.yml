@@ -1,13 +1,18 @@
 # Usage:  cp .env.example .env && docker compose up --build
 name: linkpulse
 
+x-backend-env: &backend-env
+  # Inside the compose network the services are reached by name, not localhost.
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-shortener}:${POSTGRES_PASSWORD:-shortener}@postgres:5432/${POSTGRES_DB:-shortener}
+  REDIS_URL: redis://redis:6379/0
+
 x-backend: &backend
   build: ./backend
   env_file: .env
-  environment:
-    # Inside the compose network the services are reached by name, not localhost.
-    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-shortener}:${POSTGRES_PASSWORD:-shortener}@postgres:5432/${POSTGRES_DB:-shortener}
-    REDIS_URL: redis://redis:6379/0
+  environment: *backend-env
+  volumes:
+    # Optional GeoLite2-City.mmdb (see backend/data/README.md); mounted, never baked in.
+    - ./backend/data:/app/data:ro
 
 services:
   postgres:
@@ -63,6 +68,21 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *backend-env
+      # Stable id => after a restart the worker resumes its own in-flight batch.
+      WORKER_ID: worker-1
+    restart: unless-stopped
+    stop_grace_period: 30s  # SIGTERM lets it finish the current batch
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
 volumes:
   pgdata:

@@ -1,6 +1,7 @@
 """Application settings, loaded from environment variables (and an optional .env file)."""
 
 import ipaddress
+import socket
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -42,6 +43,10 @@ class Settings(BaseSettings):
     stats_cache_ttl_seconds: int = 60
     click_queue_key: str = "clicks:queue"
     worker_batch_size: int = Field(default=100, ge=1, le=1000)
+    # Names this worker's in-flight list; keep it stable across restarts (compose sets it).
+    worker_id: str = Field(default_factory=socket.gethostname)
+    worker_block_timeout_seconds: int = Field(default=1, ge=1)
+    worker_max_backoff_seconds: float = 30.0
 
     # Geo lookup (MaxMind GeoLite2 City). Missing file => country/city "Unknown".
     geoip_db_path: str = "data/GeoLite2-City.mmdb"

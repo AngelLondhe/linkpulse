@@ -24,6 +24,7 @@ class ClickEvent:
     it for the geo lookup; it is hashed before anything is written to Postgres.
     """
 
+    event_id: str  # UUID; makes worker inserts idempotent
     link_id: int
     clicked_at: str  # ISO-8601, UTC
     ip: str

@@ -5,6 +5,7 @@ happen here; the worker does all enrichment asynchronously.
 """
 
 import re
+import uuid
 from datetime import UTC, datetime
 
 from redis.asyncio import Redis
@@ -73,13 +74,19 @@ async def record_click(
     ip: str,
     user_agent: str | None,
     referrer: str | None,
-) -> bool:
-    """Queue a raw click event for the worker. Returns False if it could not be queued."""
+) -> ClickEvent | None:
+    """Queue a raw click event for the worker.
+
+    Returns None when queued, or the event itself if Redis is unavailable, so the caller can
+    persist it directly after the response has been sent (no click is lost).
+    """
     event = ClickEvent(
+        event_id=str(uuid.uuid4()),
         link_id=entry.id,
         clicked_at=datetime.now(UTC).isoformat(),
         ip=ip,
         user_agent=user_agent[:MAX_USER_AGENT_LENGTH] if user_agent else None,
         referrer=referrer[:MAX_REFERRER_LENGTH] if referrer else None,
     )
-    return await click_queue.enqueue(redis, event)
+    queued = await click_queue.enqueue(redis, event)
+    return None if queued else event

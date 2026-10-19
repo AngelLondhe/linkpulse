@@ -40,6 +40,10 @@ plugins = ["pydantic.mypy"]
 exclude = ["^alembic/versions/"]
 
 [[tool.mypy.overrides]]
+module = ["user_agents", "user_agents.*"]  # no type stubs published
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["tests.*"]
 disallow_untyped_decorators = false
 
