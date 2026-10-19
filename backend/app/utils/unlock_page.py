@@ -6,10 +6,11 @@ HTML-escaped, and the response carries a strict CSP.
 
 from html import escape
 
+# No `form-action`: browsers apply it to the redirect that follows a form POST too, so
+# `form-action 'self'` would block the 303 to the (external) destination after unlocking.
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
-        "frame-ancestors 'none'; base-uri 'none'"
+        "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",

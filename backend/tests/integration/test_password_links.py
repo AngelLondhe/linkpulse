@@ -48,7 +48,10 @@ async def test_get_shows_form_without_recording_a_click(
     assert response.headers["content-type"].startswith("text/html")
     assert '<form method="post"' in response.text
     assert "secret.example" not in response.text  # destination is not leaked
-    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    csp = response.headers["content-security-policy"]
+    assert "frame-ancestors 'none'" in csp
+    # Regression: form-action would also block the cross-origin 303 after a correct password.
+    assert "form-action" not in csp
     assert await redis.llen(QUEUE) == 0
 
 
