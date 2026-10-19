@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
 from app.models import Link
 from app.utils.url_validation import MAX_URL_LENGTH
@@ -14,17 +15,38 @@ class LinkCreate(BaseModel):
     custom_alias: str | None = Field(
         default=None, max_length=64, description="Optional custom short code (3-30 chars)"
     )
+    expires_at: AwareDatetime | None = Field(
+        default=None, description="Link stops working at this instant (must include a TZ)"
+    )
+    max_clicks: int | None = Field(default=None, ge=1, le=1_000_000_000)
 
 
 class LinkUpdate(BaseModel):
+    """Partial update. For expires_at / max_clicks an explicit null clears the limit."""
+
     url: str | None = Field(default=None, min_length=1, max_length=MAX_URL_LENGTH)
     is_active: bool | None = None
+    expires_at: AwareDatetime | None = None
+    max_clicks: int | None = Field(default=None, ge=1, le=1_000_000_000)
 
     @model_validator(mode="after")
     def _at_least_one_field(self) -> "LinkUpdate":
         if not self.model_fields_set:
             raise ValueError("Provide at least one field to update")
         return self
+
+
+LinkStatus = Literal["active", "paused", "expired", "limit_reached"]
+
+
+def link_status(link: Link, total_clicks: int, now: datetime | None = None) -> LinkStatus:
+    if not link.is_active:
+        return "paused"
+    if link.expires_at is not None and link.expires_at <= (now or datetime.now(UTC)):
+        return "expired"
+    if link.max_clicks is not None and total_clicks >= link.max_clicks:
+        return "limit_reached"
+    return "active"
 
 
 class LinkRead(BaseModel):
@@ -38,6 +60,7 @@ class LinkRead(BaseModel):
     max_clicks: int | None
     has_password: bool
     total_clicks: int
+    status: LinkStatus
     created_at: datetime
 
     @classmethod
@@ -53,6 +76,7 @@ class LinkRead(BaseModel):
             max_clicks=link.max_clicks,
             has_password=link.password_hash is not None,
             total_clicks=total_clicks,
+            status=link_status(link, total_clicks),
             created_at=link.created_at,
         )
 

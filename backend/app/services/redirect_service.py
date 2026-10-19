@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import GoneError, NotFoundError
 from app.models import Link
-from app.services import click_queue, link_cache
+from app.services import click_limits, click_queue, link_cache
 from app.services.click_queue import ClickEvent
 from app.services.link_cache import CachedLink, Missing
 
@@ -65,6 +65,24 @@ async def resolve(
         await link_cache.invalidate(redis, code)
         raise GoneError("This link has expired", code="link_expired")
     return entry
+
+
+async def enforce_click_limit(
+    db: AsyncSession, redis: Redis, code: str, entry: CachedLink, *, is_bot: bool
+) -> None:
+    """Raise GoneError (410) once a link's max_clicks budget is used up.
+
+    Humans consume one click; bots (e.g. Slack/WhatsApp link previews) are redirected but
+    never consume, so unfurling a single-use link does not burn it.
+    """
+    if entry.max_clicks is None:
+        return
+    admitted = await click_limits.try_admit(
+        db, redis, entry.id, entry.max_clicks, consume=not is_bot
+    )
+    if not admitted:
+        await link_cache.invalidate(redis, code)
+        raise GoneError("This link has reached its click limit", code="link_limit_reached")
 
 
 async def record_click(

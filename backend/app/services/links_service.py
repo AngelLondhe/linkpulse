@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from redis.asyncio import Redis
 from sqlalchemy import ScalarSelect, func, or_, select
@@ -18,7 +19,7 @@ from app.core.errors import (
 )
 from app.models import Click, Link, User
 from app.schemas.links import LinkCreate, LinkUpdate
-from app.services import link_cache
+from app.services import click_limits, link_cache
 from app.utils.aliases import InvalidAliasError, validate_alias
 from app.utils.db_errors import is_unique_violation
 from app.utils.shortcode import generate_short_code
@@ -40,6 +41,12 @@ def validate_destination(url: str) -> str:
         return validate_target_url(url, own_hosts)
     except InvalidURLError as exc:
         raise ValidationError(str(exc), code="invalid_url") from exc
+
+
+def _validated_expiry(expires_at: datetime | None) -> datetime | None:
+    if expires_at is not None and expires_at <= datetime.now(UTC):
+        raise ValidationError("Expiry must be in the future", code="invalid_expiry")
+    return expires_at
 
 
 def _validated_alias(alias: str) -> str:
@@ -68,12 +75,18 @@ async def create_link(db: AsyncSession, redis: Redis, owner: User, data: LinkCre
     race-free, unlike "SELECT then INSERT", and free in the overwhelmingly common case.
     """
     destination = validate_destination(data.url)
+    expires_at = _validated_expiry(data.expires_at)
     # Read before any rollback: a rollback expires every object in the session, incl. `owner`.
     owner_id = owner.id
 
     def new_link(code: str, *, is_custom: bool) -> Link:
         return Link(
-            user_id=owner_id, short_code=code, original_url=destination, is_custom=is_custom
+            user_id=owner_id,
+            short_code=code,
+            original_url=destination,
+            is_custom=is_custom,
+            expires_at=expires_at,
+            max_clicks=data.max_clicks,
         )
 
     if data.custom_alias is not None:
@@ -106,7 +119,7 @@ def _click_count_subquery() -> ScalarSelect[int]:
     """Correlated COUNT(*) of clicks per link, served by the (link_id, clicked_at) index."""
     return (
         select(func.count(Click.id))
-        .where(Click.link_id == Link.id)
+        .where(Click.link_id == Link.id, Click.device_type != "bot")
         .correlate(Link)
         .scalar_subquery()
     )
@@ -159,19 +172,26 @@ async def get_owned_link(db: AsyncSession, owner: User, link_id: int) -> Link:
 
 
 async def count_clicks(db: AsyncSession, link_id: int) -> int:
-    return await db.scalar(select(func.count(Click.id)).where(Click.link_id == link_id)) or 0
+    """Human (non-bot) clicks recorded so far."""
+    return await click_limits.human_clicks_in_db(db, link_id)
 
 
 async def update_link(
     db: AsyncSession, redis: Redis, owner: User, link_id: int, changes: LinkUpdate
 ) -> Link:
-    """Apply a partial update to an owned link (destination URL and/or active flag), then
-    invalidate its cached redirect entry so the change takes effect immediately."""
+    """Apply a partial update to an owned link, then invalidate its cached redirect entry so
+    the change takes effect immediately. For ``expires_at`` / ``max_clicks`` an explicit
+    null removes the limit; omitting the field leaves it unchanged."""
     link = await get_owned_link(db, owner, link_id)
+    provided = changes.model_fields_set
     if changes.url is not None:
         link.original_url = validate_destination(changes.url)
     if changes.is_active is not None:
         link.is_active = changes.is_active
+    if "expires_at" in provided:
+        link.expires_at = _validated_expiry(changes.expires_at)
+    if "max_clicks" in provided:
+        link.max_clicks = changes.max_clicks
     await db.commit()
     await db.refresh(link)
     await link_cache.invalidate(redis, link.short_code)
@@ -181,7 +201,8 @@ async def update_link(
 async def delete_link(db: AsyncSession, redis: Redis, owner: User, link_id: int) -> None:
     """Delete an owned link (clicks go via ON DELETE CASCADE) and evict it from the cache."""
     link = await get_owned_link(db, owner, link_id)
-    code = link.short_code
+    code, deleted_id = link.short_code, link.id
     await db.delete(link)
     await db.commit()
     await link_cache.invalidate(redis, code)
+    await click_limits.forget(redis, deleted_id)
