@@ -11,6 +11,9 @@ from app.utils.url_validation import MAX_URL_LENGTH
 
 class LinkCreate(BaseModel):
     url: str = Field(min_length=1, max_length=MAX_URL_LENGTH)
+    custom_alias: str | None = Field(
+        default=None, max_length=64, description="Optional custom short code (3-30 chars)"
+    )
 
 
 class LinkUpdate(BaseModel):

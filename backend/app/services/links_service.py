@@ -10,14 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import (
+    ConflictError,
     ForbiddenError,
     NotFoundError,
     ServiceUnavailableError,
     ValidationError,
 )
 from app.models import Click, Link, User
-from app.schemas.links import LinkUpdate
+from app.schemas.links import LinkCreate, LinkUpdate
 from app.services import link_cache
+from app.utils.aliases import InvalidAliasError, validate_alias
 from app.utils.db_errors import is_unique_violation
 from app.utils.shortcode import generate_short_code
 from app.utils.url_validation import InvalidURLError, own_hosts_from_urls, validate_target_url
@@ -40,35 +42,60 @@ def validate_destination(url: str) -> str:
         raise ValidationError(str(exc), code="invalid_url") from exc
 
 
-async def create_link(db: AsyncSession, redis: Redis, owner: User, url: str) -> Link:
-    """Create a link with a random 7-char Base62 code.
+def _validated_alias(alias: str) -> str:
+    try:
+        return validate_alias(alias)
+    except InvalidAliasError as exc:
+        raise ValidationError(str(exc), code="invalid_alias") from exc
 
-    Collisions are handled optimistically: insert, and if the unique index on ``short_code``
-    rejects it, retry with a fresh code (up to MAX_CODE_ATTEMPTS). This is race-free, unlike
-    "SELECT then INSERT", and costs nothing in the overwhelmingly common no-collision case.
+
+async def _insert(db: AsyncSession, redis: Redis, link: Link) -> Link:
+    """Commit a new link (IntegrityError propagates) and clear any negative-cache entry."""
+    db.add(link)
+    await db.commit()
+    await db.refresh(link)
+    await link_cache.invalidate(redis, link.short_code)
+    return link
+
+
+async def create_link(db: AsyncSession, redis: Redis, owner: User, data: LinkCreate) -> Link:
+    """Create a short link, with a custom alias or a random 7-char Base62 code.
+
+    Custom aliases: a unique-index violation means the alias is taken (409, no retry).
+
+    Random codes: collisions are handled optimistically: insert, and if the unique index on
+    ``short_code`` rejects it, retry with a fresh code (up to MAX_CODE_ATTEMPTS). This is
+    race-free, unlike "SELECT then INSERT", and free in the overwhelmingly common case.
     """
-    destination = validate_destination(url)
-    # Read before the loop: a rollback expires every object in the session, including `owner`.
+    destination = validate_destination(data.url)
+    # Read before any rollback: a rollback expires every object in the session, incl. `owner`.
     owner_id = owner.id
-    for attempt in range(1, MAX_CODE_ATTEMPTS + 1):
-        link = Link(
-            user_id=owner_id,
-            short_code=generate_short_code(),
-            original_url=destination,
-            is_custom=False,
+
+    def new_link(code: str, *, is_custom: bool) -> Link:
+        return Link(
+            user_id=owner_id, short_code=code, original_url=destination, is_custom=is_custom
         )
-        db.add(link)
+
+    if data.custom_alias is not None:
+        alias = _validated_alias(data.custom_alias)
         try:
-            await db.commit()
+            return await _insert(db, redis, new_link(alias, is_custom=True))
+        except IntegrityError as exc:
+            await db.rollback()
+            if is_unique_violation(exc, SHORT_CODE_INDEX):
+                raise ConflictError(
+                    f"The alias '{alias}' is already taken", code="alias_taken"
+                ) from exc
+            raise
+
+    for attempt in range(1, MAX_CODE_ATTEMPTS + 1):
+        try:
+            return await _insert(db, redis, new_link(generate_short_code(), is_custom=False))
         except IntegrityError as exc:
             await db.rollback()
             if not is_unique_violation(exc, SHORT_CODE_INDEX):
                 raise
             logger.warning("Short code collision on attempt %d/%d", attempt, MAX_CODE_ATTEMPTS)
-            continue
-        await db.refresh(link)
-        await link_cache.invalidate(redis, link.short_code)  # drop any negative-cache entry
-        return link
 
     raise ServiceUnavailableError(
         "Could not allocate a unique short code, please retry", code="code_generation_failed"

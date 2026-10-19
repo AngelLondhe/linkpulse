@@ -30,7 +30,7 @@ async def create_link(
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ) -> LinkRead:
-    link = await links_service.create_link(db, redis, user, body.url)
+    link = await links_service.create_link(db, redis, user, body)
     return LinkRead.from_model(link, total_clicks=0, base_url=_base_url())
 
 
