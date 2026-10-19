@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint, types, tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: shortener
+          POSTGRES_PASSWORD: shortener
+          POSTGRES_DB: shortener_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U shortener -d shortener_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://shortener:shortener@localhost:5432/shortener_test
+      TEST_REDIS_URL: redis://localhost:6379/15
+      # Throwaway values for the test run only.
+      JWT_SECRET_KEY: ci-only-jwt-secret-0123456789abcdefghijklmnop
+      IP_HASH_SALT: ci-only-ip-salt-0123456789
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Ruff (lint)
+        run: ruff check .
+      - name: Ruff (format)
+        run: ruff format --check .
+      - name: Mypy
+        run: mypy app tests scripts benchmarks
+      - name: Pytest (coverage gate 80%)
+        run: pytest --cov --cov-report=term --cov-report=xml
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: backend/coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  frontend:
+    name: Frontend (lint, types, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+
+  compose-smoke:
+    name: Docker Compose smoke test
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the full stack
+        run: |
+          cp .env.example .env
+          docker compose up --build -d
+      - name: Wait for the API
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8000/api/health && exit 0
+            sleep 2
+          done
+          docker compose ps; docker compose logs; exit 1
+      - name: Seed demo data and exercise the system
+        run: |
+          docker compose exec -T api python -m scripts.seed
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/launch24)
+          test "$code" = "302"
+          token=$(curl -sf -X POST http://localhost:8000/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"demo@linkpulse.dev","password":"demo-password-123"}' \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+          curl -sf http://localhost:8000/api/links -H "Authorization: Bearer $token" > /dev/null
+          curl -sf http://localhost:5173/ | grep -q '<div id="root">'
+      - name: Worker drains the click queue
+        run: |
+          for i in $(seq 1 30); do
+            left=$(docker compose exec -T redis redis-cli llen clicks:queue)
+            [ "$left" = "0" ] && exit 0
+            sleep 1
+          done
+          docker compose logs worker; exit 1
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
