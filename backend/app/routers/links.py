@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Response, status
@@ -10,7 +11,8 @@ from app.db.session import get_db
 from app.models import User
 from app.routers.deps import get_current_user
 from app.schemas.links import LinkCreate, LinkPage, LinkRead, LinkUpdate
-from app.services import links_service
+from app.schemas.stats import LinkStats
+from app.services import links_service, stats_service
 
 router = APIRouter(prefix="/api/links", tags=["links"])
 
@@ -86,3 +88,18 @@ async def delete_link(
 ) -> Response:
     await links_service.delete_link(db, redis, user, link_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{link_id}/stats", response_model=LinkStats)
+async def link_stats(
+    link_id: LinkId,
+    start: Annotated[date | None, Query(alias="from", description="First day (inclusive)")] = None,
+    end: Annotated[date | None, Query(alias="to", description="Last day (inclusive)")] = None,
+    tz: Annotated[str, Query(max_length=64, description="IANA zone for day buckets")] = "UTC",
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> LinkStats:
+    return await stats_service.get_link_stats(
+        db, redis, user, link_id, start=start, end=end, timezone=tz
+    )
