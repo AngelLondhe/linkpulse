@@ -1,4 +1,4 @@
-import type { ApiErrorBody, AuthResponse, Link, LinkPage, LinkStats, User } from './types'
+import type { ApiErrorBody, AuthResponse, Link, LinkCreateInput, LinkPage, LinkStats, User } from './types'
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(
   /\/$/,
@@ -45,7 +45,7 @@ function messageFor(status: number, body: unknown): { code: string; message: str
   return { code: 'http_error', message: `Request failed (${status})`, details: null }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function send(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers)
   if (init.body !== undefined) headers.set('Content-Type', 'application/json')
   if (authToken) headers.set('Authorization', `Bearer ${authToken}`)
@@ -56,15 +56,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   } catch {
     throw new ApiError(0, 'network_error', 'Cannot reach the server. Check your connection.')
   }
-
-  if (response.status === 204) return undefined as T
-  const body: unknown = await response.json().catch(() => null)
   if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null)
     const { code, message, details } = messageFor(response.status, body)
     if (response.status === 401 && authToken) onUnauthorized?.()
+    if (response.status === 429) {
+      const wait = response.headers.get('Retry-After')
+      throw new ApiError(429, code, wait ? `${message} Try again in ${wait}s.` : message, details)
+    }
     throw new ApiError(response.status, code, message, details)
   }
-  return body as T
+  return response
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await send(path, init)
+  if (response.status === 204) return undefined as T
+  return (await response.json()) as T
 }
 
 const json = (data: unknown) => JSON.stringify(data)
@@ -82,10 +90,15 @@ export const api = {
     return request<LinkPage>(`/api/links?${search}`)
   },
   getLink: (id: number) => request<Link>(`/api/links/${id}`),
-  createLink: (url: string) => request<Link>('/api/links', { method: 'POST', body: json({ url }) }),
+  createLink: (input: LinkCreateInput) => request<Link>('/api/links', { method: 'POST', body: json(input) }),
   updateLink: (id: number, changes: { url?: string; is_active?: boolean }) =>
     request<Link>(`/api/links/${id}`, { method: 'PATCH', body: json(changes) }),
   deleteLink: (id: number) => request<void>(`/api/links/${id}`, { method: 'DELETE' }),
-  linkStats: (id: number, range: { from: string; to: string; tz: string }) =>
-    request<LinkStats>(`/api/links/${id}/stats?${new URLSearchParams(range)}`),
+  linkStats: (id: number, range: { from: string; to: string; tz: string }, includeBots: boolean) =>
+    request<LinkStats>(
+      `/api/links/${id}/stats?${new URLSearchParams({ ...range, include_bots: String(includeBots) })}`,
+    ),
+  /** QR image as a Blob (needs the auth header, so it can't be a plain <img src>). */
+  linkQr: async (id: number, format: 'png' | 'svg') =>
+    (await send(`/api/links/${id}/qr?format=${format}&scale=10`)).blob(),
 }

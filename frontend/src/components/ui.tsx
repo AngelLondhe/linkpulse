@@ -2,6 +2,7 @@ import { AlertTriangle, Check, Copy, Loader2 } from 'lucide-react'
 import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { copyText } from '../lib/clipboard'
+import type { LinkStatus } from '../lib/types'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
@@ -99,15 +100,20 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
   )
 }
 
-export function StatusBadge({ active }: { active: boolean }) {
+const STATUS: Record<LinkStatus, { label: string; dot: string; text: string }> = {
+  active: { label: 'Active', dot: 'bg-good', text: 'text-ink' },
+  paused: { label: 'Paused', dot: 'bg-muted', text: 'text-muted' },
+  expired: { label: 'Expired', dot: 'bg-danger', text: 'text-ink-2' },
+  limit_reached: { label: 'Limit reached', dot: 'bg-danger', text: 'text-ink-2' },
+}
+
+/** Status is never colour-only: the dot always comes with a text label. */
+export function StatusBadge({ status }: { status: LinkStatus }) {
+  const { label, dot, text } = STATUS[status]
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-        active ? 'bg-surface-2 text-ink' : 'bg-surface-2 text-muted'
-      }`}
-    >
-      <span aria-hidden className={`size-1.5 rounded-full ${active ? 'bg-good' : 'bg-muted'}`} />
-      {active ? 'Active' : 'Paused'}
+    <span className={`inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium whitespace-nowrap ${text}`}>
+      <span aria-hidden className={`size-1.5 rounded-full ${dot}`} />
+      {label}
     </span>
   )
 }

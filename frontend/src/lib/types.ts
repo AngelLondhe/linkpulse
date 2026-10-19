@@ -13,6 +13,8 @@ export interface AuthResponse {
   user: User
 }
 
+export type LinkStatus = 'active' | 'paused' | 'expired' | 'limit_reached'
+
 export interface Link {
   id: number
   short_code: string
@@ -24,7 +26,16 @@ export interface Link {
   max_clicks: number | null
   has_password: boolean
   total_clicks: number
+  status: LinkStatus
   created_at: string
+}
+
+export interface LinkCreateInput {
+  url: string
+  custom_alias?: string
+  expires_at?: string
+  max_clicks?: number
+  password?: string
 }
 
 export interface LinkPage {
@@ -53,6 +64,8 @@ export interface LinkStats {
   total_clicks: number
   unique_visitors: number
   all_time_clicks: number
+  bot_clicks: number
+  include_bots: boolean
   timeseries: TimeseriesPoint[]
   referrers: Bucket[]
   devices: Bucket[]

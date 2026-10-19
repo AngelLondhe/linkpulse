@@ -1,4 +1,4 @@
-import { BarChart3, ChevronLeft, ChevronRight, Link2, Pause, Play, Search, Trash2 } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, Link2, Lock, Pause, Play, Search, Trash2 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { Link as RouterLink, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
@@ -9,19 +9,46 @@ import { PAGE_SIZE, useCreateLink, useDeleteLink, useLinkList, useUpdateLink } f
 import { ApiError } from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { formatDateTime, formatNumber, formatRelative, prettyUrl } from '../lib/format'
-import type { Link } from '../lib/types'
+import type { Link, LinkCreateInput } from '../lib/types'
+
+const inputClass = 'w-full rounded-lg border border-line bg-page px-3 py-2 text-sm'
+
+function toLocalInputValue(date: Date): string {
+  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return shifted.toISOString().slice(0, 16)
+}
 
 function CreateLinkForm() {
   const [url, setUrl] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [alias, setAlias] = useState('')
+  const [expiresAt, setExpiresAt] = useState('')
+  const [maxClicks, setMaxClicks] = useState('')
+  const [password, setPassword] = useState('')
+  const [minExpiry] = useState(() => toLocalInputValue(new Date()))
   const [error, setError] = useState<string | null>(null)
   const create = useCreateLink()
+
+  function buildInput(): LinkCreateInput {
+    const input: LinkCreateInput = { url: url.trim() }
+    if (alias.trim()) input.custom_alias = alias.trim()
+    // <input type="datetime-local"> is in local time; send an absolute, tz-aware instant.
+    if (expiresAt) input.expires_at = new Date(expiresAt).toISOString()
+    if (maxClicks) input.max_clicks = Number(maxClicks)
+    if (password) input.password = password
+    return input
+  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
     setError(null)
     try {
-      const link = await create.mutateAsync(url.trim())
+      const link = await create.mutateAsync(buildInput())
       setUrl('')
+      setAlias('')
+      setExpiresAt('')
+      setMaxClicks('')
+      setPassword('')
       const copied = await copyText(link.short_url)
       toast.success(copied ? 'Short link created and copied' : 'Short link created', {
         description: link.short_url,
@@ -33,28 +60,91 @@ function CreateLinkForm() {
 
   return (
     <Card className="p-4 sm:p-5">
-      <form onSubmit={onSubmit} className="flex flex-col gap-3 sm:flex-row">
-        <label className="sr-only" htmlFor="long-url">
-          Long URL
-        </label>
-        <div className="relative flex-1">
-          <Link2 className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" aria-hidden />
-          <input
-            id="long-url"
-            type="url"
-            inputMode="url"
-            required
-            placeholder="Paste a long URL, e.g. https://example.com/a/very/long/path"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? 'create-error' : undefined}
-            className="w-full rounded-lg border border-line bg-page py-2.5 pr-3 pl-9 text-sm"
-          />
+      <form onSubmit={onSubmit}>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <label className="sr-only" htmlFor="long-url">
+            Long URL
+          </label>
+          <div className="relative flex-1">
+            <Link2 className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" aria-hidden />
+            <input
+              id="long-url"
+              type="url"
+              inputMode="url"
+              required
+              placeholder="Paste a long URL, e.g. https://example.com/a/very/long/path"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'create-error' : undefined}
+              className="w-full rounded-lg border border-line bg-page py-2.5 pr-3 pl-9 text-sm"
+            />
+          </div>
+          <Button type="submit" variant="primary" loading={create.isPending} disabled={!url.trim()}>
+            Shorten
+          </Button>
         </div>
-        <Button type="submit" variant="primary" loading={create.isPending} disabled={!url.trim()}>
-          Shorten
-        </Button>
+
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((v) => !v)}
+          aria-expanded={showAdvanced}
+          aria-controls="advanced-options"
+          className="mt-3 inline-flex items-center gap-1 text-sm text-ink-2 hover:text-ink"
+        >
+          <ChevronDown className={`size-4 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} aria-hidden />
+          Advanced options
+        </button>
+
+        {showAdvanced && (
+          <div id="advanced-options" className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block text-sm">
+              <span className="font-medium">Custom alias</span>
+              <input
+                value={alias}
+                onChange={(e) => setAlias(e.target.value)}
+                placeholder="my-launch"
+                pattern="[a-zA-Z0-9_\-]{3,30}"
+                title="3-30 letters, digits, - or _"
+                className={`mt-1 ${inputClass}`}
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="font-medium">Expires at</span>
+              <input
+                type="datetime-local"
+                value={expiresAt}
+                min={minExpiry}
+                onChange={(e) => setExpiresAt(e.target.value)}
+                className={`mt-1 ${inputClass}`}
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="font-medium">Max clicks</span>
+              <input
+                type="number"
+                min={1}
+                inputMode="numeric"
+                value={maxClicks}
+                onChange={(e) => setMaxClicks(e.target.value)}
+                placeholder="Unlimited"
+                className={`mt-1 ${inputClass}`}
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="font-medium">Password</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={4}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="None"
+                className={`mt-1 ${inputClass}`}
+              />
+            </label>
+          </div>
+        )}
       </form>
       {error && (
         <p id="create-error" role="alert" className="mt-2 text-sm text-danger">
@@ -62,6 +152,15 @@ function CreateLinkForm() {
         </p>
       )}
     </Card>
+  )
+}
+
+function ClickCount({ link }: { link: Link }) {
+  return (
+    <span className="tabular">
+      {formatNumber(link.total_clicks)}
+      {link.max_clicks !== null && <span className="text-muted"> / {formatNumber(link.max_clicks)}</span>}
+    </span>
   )
 }
 
@@ -116,6 +215,9 @@ function ShortLink({ link }: { link: Link }) {
       >
         {prettyUrl(link.short_url)}
       </a>
+      {link.has_password && (
+        <Lock className="size-3.5 shrink-0 text-muted" aria-label="Password protected" />
+      )}
       <CopyButton text={link.short_url} label="Copy short link" />
     </div>
   )
@@ -130,9 +232,9 @@ function LinksTable({ links, onDelete }: { links: Link[]; onDelete: (link: Link)
           <tr className="border-b border-line">
             <th scope="col" className="w-[26%] px-5 py-2.5 font-medium">Short link</th>
             <th scope="col" className="px-3 py-2.5 font-medium">Destination</th>
-            <th scope="col" className="w-20 px-3 py-2.5 text-right font-medium">Clicks</th>
+            <th scope="col" className="w-24 px-3 py-2.5 text-right font-medium">Clicks</th>
             <th scope="col" className="w-32 px-3 py-2.5 font-medium">Created</th>
-            <th scope="col" className="w-24 px-3 py-2.5 font-medium">Status</th>
+            <th scope="col" className="w-32 px-3 py-2.5 font-medium">Status</th>
             <th scope="col" className="w-32 px-5 py-2.5"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
@@ -141,9 +243,9 @@ function LinksTable({ links, onDelete }: { links: Link[]; onDelete: (link: Link)
             <tr key={link.id} className="border-b border-line last:border-0 hover:bg-surface-2/50">
               <td className="px-5 py-2"><ShortLink link={link} /></td>
               <td className="truncate px-3 py-2 text-ink-2" title={link.original_url}>{prettyUrl(link.original_url)}</td>
-              <td className="tabular px-3 py-2 text-right">{formatNumber(link.total_clicks)}</td>
+              <td className="px-3 py-2 text-right"><ClickCount link={link} /></td>
               <td className="px-3 py-2 whitespace-nowrap text-ink-2" title={formatDateTime(link.created_at)}>{formatRelative(link.created_at)}</td>
-              <td className="px-3 py-2"><StatusBadge active={link.is_active} /></td>
+              <td className="px-3 py-2"><StatusBadge status={link.status} /></td>
               <td className="px-5 py-2"><RowActions link={link} onDelete={onDelete} /></td>
             </tr>
           ))}
@@ -156,12 +258,12 @@ function LinksTable({ links, onDelete }: { links: Link[]; onDelete: (link: Link)
           <li key={link.id} className="space-y-1.5 px-4 py-3">
             <div className="flex items-center justify-between gap-2">
               <ShortLink link={link} />
-              <StatusBadge active={link.is_active} />
+              <StatusBadge status={link.status} />
             </div>
             <p className="truncate text-sm text-ink-2" title={link.original_url}>{prettyUrl(link.original_url)}</p>
             <div className="flex items-center justify-between text-xs text-muted">
               <span>
-                <span className="tabular font-medium text-ink">{formatNumber(link.total_clicks)}</span> clicks ·{' '}
+                <span className="font-medium text-ink"><ClickCount link={link} /></span> clicks ·{' '}
                 {formatRelative(link.created_at)}
               </span>
               <RowActions link={link} onDelete={onDelete} />

@@ -9,9 +9,10 @@ import { Card, CopyButton, ErrorState, Skeleton, StatusBadge } from '../componen
 import { useLink, useLinkStats } from '../hooks/useLinks'
 import { ApiError } from '../lib/api'
 import { RANGES, type RangeKey } from '../lib/dates'
-import { countryName, deviceLabel, formatCompact, formatDateTime, formatPercent, prettyUrl } from '../lib/format'
+import { countryName, deviceLabel, formatCompact, formatDateTime, formatNumber, formatPercent, prettyUrl } from '../lib/format'
 import type { LinkStats } from '../lib/types'
 import { NotFoundPage } from './NotFoundPage'
+import { QrButton } from '../components/QrDialog'
 
 // The map (topojson + projection) is the heaviest piece; load it on demand.
 const WorldMap = lazy(() => import('../components/charts/WorldMap').then((m) => ({ default: m.WorldMap })))
@@ -110,8 +111,9 @@ function Dashboard({ stats }: { stats: LinkStats }) {
 export function LinkAnalyticsPage() {
   const id = Number(useParams().id)
   const [range, setRange] = useState<RangeKey>('30d')
+  const [includeBots, setIncludeBots] = useState(false)
   const link = useLink(id)
-  const stats = useLinkStats(id, range)
+  const stats = useLinkStats(id, range, includeBots)
 
   if (!Number.isInteger(id) || id < 1) return <NotFoundPage embedded />
   const linkError = link.error instanceof ApiError ? link.error : null
@@ -137,7 +139,7 @@ export function LinkAnalyticsPage() {
               <div className="flex items-center gap-2">
                 <h1 className="truncate text-xl font-semibold tracking-tight">{prettyUrl(link.data.short_url)}</h1>
                 <CopyButton text={link.data.short_url} label="Copy short link" />
-                <StatusBadge active={link.data.is_active} />
+                <StatusBadge status={link.data.status} />
               </div>
               <a
                 href={link.data.original_url}
@@ -149,16 +151,42 @@ export function LinkAnalyticsPage() {
                 <span className="truncate">{link.data.original_url}</span>
                 <ExternalLink className="size-3.5 shrink-0" aria-hidden />
               </a>
-              <p className="mt-1 text-xs text-muted">Created {formatDateTime(link.data.created_at)}</p>
+              <p className="mt-1 text-xs text-muted">
+                Created {formatDateTime(link.data.created_at)}
+                {link.data.expires_at && ` · Expires ${formatDateTime(link.data.expires_at)}`}
+                {link.data.max_clicks !== null && ` · Limit ${formatNumber(link.data.max_clicks)} clicks`}
+                {link.data.has_password && ' · Password protected'}
+              </p>
             </div>
+            <QrButton link={link.data} />
           </div>
         )}
       </Card>
 
       {/* One filter row scopes every chart below it. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Analytics</h2>
-        <RangeSelector value={range} onChange={setRange} />
+        <div>
+          <h2 className="text-lg font-semibold">Analytics</h2>
+          {stats.data && (
+            <p className="text-xs text-muted">
+              {stats.data.include_bots
+                ? `Including ${formatNumber(stats.data.bot_clicks)} bot clicks`
+                : `${formatNumber(stats.data.bot_clicks)} bot and link-preview clicks filtered out`}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="inline-flex items-center gap-2 text-sm text-ink-2">
+            <input
+              type="checkbox"
+              checked={includeBots}
+              onChange={(e) => setIncludeBots(e.target.checked)}
+              className="size-4 accent-[var(--accent)]"
+            />
+            Include bots
+          </label>
+          <RangeSelector value={range} onChange={setRange} />
+        </div>
       </div>
 
       {stats.isPending ? (
