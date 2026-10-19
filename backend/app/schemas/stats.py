@@ -22,6 +22,8 @@ class LinkStats(BaseModel):
     total_clicks: int
     unique_visitors: int
     all_time_clicks: int
+    bot_clicks: int  # in the window; excluded from every other figure unless include_bots
+    include_bots: bool
     timeseries: list[TimeseriesPoint]
     referrers: list[Bucket]
     devices: list[Bucket]

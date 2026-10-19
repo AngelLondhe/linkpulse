@@ -65,8 +65,9 @@ def build_window(start: date | None, end: date | None, timezone: str) -> StatsWi
     return StatsWindow(start=start, end=end, timezone=timezone)
 
 
-def _cache_key(link_id: int, window: StatsWindow) -> str:
-    return f"stats:{link_id}:{window.start}:{window.end}:{window.timezone}"
+def _cache_key(link_id: int, window: StatsWindow, include_bots: bool) -> str:
+    bots = "bots" if include_bots else "humans"
+    return f"stats:{link_id}:{window.start}:{window.end}:{window.timezone}:{bots}"
 
 
 async def _read_cache(redis: Redis, key: str) -> LinkStats | None:
@@ -139,19 +140,34 @@ async def _top(
     return [Bucket(label=value, count=total) for value, total in rows.all()]
 
 
-async def compute_stats(db: AsyncSession, link_id: int, window: StatsWindow) -> LinkStats:
-    """Run the aggregation queries for one link and window (no caching, no auth)."""
-    filters: list[ColumnElement[bool]] = [
+async def compute_stats(
+    db: AsyncSession, link_id: int, window: StatsWindow, *, include_bots: bool = False
+) -> LinkStats:
+    """Run the aggregation queries for one link and window (no caching, no auth).
+
+    Bot traffic (crawlers, link unfurlers, scripts) is excluded unless ``include_bots``.
+    """
+    in_window: list[ColumnElement[bool]] = [
         Click.link_id == link_id,
         Click.clicked_at >= window.starts_at,
         Click.clicked_at < window.ends_before,
     ]
+    human_only: list[ColumnElement[bool]] = [] if include_bots else [Click.device_type != "bot"]
+    filters = in_window + human_only
     totals = (
         await db.execute(
-            select(func.count(), func.count(func.distinct(Click.ip_hash))).where(*filters)
+            select(
+                func.count().filter(*human_only) if human_only else func.count(),
+                func.count(func.distinct(Click.ip_hash)).filter(*human_only)
+                if human_only
+                else func.count(func.distinct(Click.ip_hash)),
+                func.count().filter(Click.device_type == "bot"),
+            ).where(*in_window)
         )
     ).one()
-    all_time = await db.scalar(select(func.count()).where(Click.link_id == link_id)) or 0
+    all_time = (
+        await db.scalar(select(func.count()).where(Click.link_id == link_id, *human_only)) or 0
+    )
 
     return LinkStats(
         link_id=link_id,
@@ -161,6 +177,8 @@ async def compute_stats(db: AsyncSession, link_id: int, window: StatsWindow) -> 
         total_clicks=totals[0],
         unique_visitors=totals[1],
         all_time_clicks=all_time,
+        bot_clicks=totals[2],
+        include_bots=include_bots,
         timeseries=await _timeseries(db, filters, window),
         referrers=await _top(db, Click.referrer, filters, DIRECT),
         devices=await _top(db, Click.device_type, filters, UNKNOWN),
@@ -179,6 +197,7 @@ async def get_link_stats(
     start: date | None,
     end: date | None,
     timezone: str,
+    include_bots: bool = False,
 ) -> LinkStats:
     """Ownership-checked stats for a link, served from a 60 s Redis cache when possible.
 
@@ -187,11 +206,11 @@ async def get_link_stats(
     """
     link = await get_owned_link(db, owner, link_id)
     window = build_window(start, end, timezone)
-    key = _cache_key(link.id, window)
+    key = _cache_key(link.id, window, include_bots)
 
     cached = await _read_cache(redis, key)
     if cached is not None:
         return cached
-    stats = await compute_stats(db, link.id, window)
+    stats = await compute_stats(db, link.id, window, include_bots=include_bots)
     await _write_cache(redis, key, stats)
     return stats

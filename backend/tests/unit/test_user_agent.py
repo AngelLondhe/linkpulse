@@ -39,10 +39,21 @@ def test_parses_common_user_agents(ua: str, browser: str, os: str, device: str) 
     assert (parsed.browser, parsed.os, parsed.device_type) == (browser, os, device)
 
 
-@pytest.mark.parametrize("ua", [None, "", "totally-not-a-browser/0.0"])
-def test_missing_or_unrecognised_user_agent_is_unknown(ua: str | None) -> None:
-    parsed = parse_user_agent(ua)
+def test_unrecognised_user_agent_is_unknown() -> None:
+    parsed = parse_user_agent("totally-not-a-browser/0.0")
 
-    assert parsed.browser == "Unknown"
-    assert parsed.os == "Unknown"
-    assert parsed.device_type == "other"
+    assert (parsed.browser, parsed.os, parsed.device_type) == ("Unknown", "Unknown", "other")
+
+
+@pytest.mark.parametrize(
+    "ua",
+    [
+        None,
+        "",
+        "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+        "WhatsApp/2.23.20.0",
+        "curl/8.4.0",
+    ],
+)
+def test_missing_ua_previews_and_tools_are_bots(ua: str | None) -> None:
+    assert parse_user_agent(ua).device_type == "bot"

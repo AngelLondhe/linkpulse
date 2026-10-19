@@ -101,12 +101,13 @@ async def link_stats(
     start: Annotated[date | None, Query(alias="from", description="First day (inclusive)")] = None,
     end: Annotated[date | None, Query(alias="to", description="Last day (inclusive)")] = None,
     tz: Annotated[str, Query(max_length=64, description="IANA zone for day buckets")] = "UTC",
+    include_bots: Annotated[bool, Query(description="Count crawler/preview traffic")] = False,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ) -> LinkStats:
     return await stats_service.get_link_stats(
-        db, redis, user, link_id, start=start, end=end, timezone=tz
+        db, redis, user, link_id, start=start, end=end, timezone=tz, include_bots=include_bots
     )
 
 

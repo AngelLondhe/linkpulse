@@ -213,7 +213,7 @@ async def test_stats_are_cached_for_60_seconds(
     await _add(db, [_click(link, _at(3))])  # arrives while the cache entry is warm
     second = await _stats(client, user, link)
 
-    key = f"stats:{link.id}:2026-01-01:2026-01-07:UTC"
+    key = f"stats:{link.id}:2026-01-01:2026-01-07:UTC:humans"
     assert 0 < await redis.ttl(key) <= 60
     assert first == second
     assert second["total_clicks"] == 1
@@ -248,3 +248,31 @@ def test_max_range_is_inclusive() -> None:
     start = end - timedelta(days=stats_service.MAX_RANGE_DAYS - 1)
 
     assert build_window(start, end, "UTC").start == start
+
+
+async def test_bots_are_excluded_by_default(
+    client: AsyncClient, db: AsyncSession, user: User
+) -> None:
+    link = await _link(db, user)
+    await _add(
+        db,
+        [
+            _click(link, _at(2), ip_hash="1" * 64),
+            _click(link, _at(2), device_type="bot", browser="Googlebot", ip_hash="9" * 64),
+            _click(link, _at(3), device_type="bot", browser="Slackbot", ip_hash="8" * 64),
+        ],
+    )
+
+    humans = await _stats(client, user, link)
+    everyone = await _stats(client, user, link, "from=2026-01-01&to=2026-01-07&include_bots=true")
+
+    assert (humans["total_clicks"], humans["unique_visitors"], humans["bot_clicks"]) == (1, 1, 2)
+    assert humans["all_time_clicks"] == 1
+    assert [b["label"] for b in humans["browsers"]] == ["Chrome"]
+    assert humans["include_bots"] is False
+    assert (everyone["total_clicks"], everyone["unique_visitors"], everyone["bot_clicks"]) == (
+        3,
+        3,
+        2,
+    )
+    assert {"label": "bot", "count": 2} in everyone["devices"]
