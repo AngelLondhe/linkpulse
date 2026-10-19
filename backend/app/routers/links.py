@@ -12,7 +12,7 @@ from app.models import User
 from app.routers.deps import get_current_user
 from app.schemas.links import LinkCreate, LinkPage, LinkRead, LinkUpdate
 from app.schemas.stats import LinkStats
-from app.services import links_service, stats_service
+from app.services import links_service, qr_service, stats_service
 
 router = APIRouter(prefix="/api/links", tags=["links"])
 
@@ -102,4 +102,31 @@ async def link_stats(
 ) -> LinkStats:
     return await stats_service.get_link_stats(
         db, redis, user, link_id, start=start, end=end, timezone=tz
+    )
+
+
+@router.get(
+    "/{link_id}/qr",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}, "image/svg+xml": {}}}},
+)
+async def link_qr_code(
+    link_id: LinkId,
+    fmt: Annotated[qr_service.QRFormat, Query(alias="format")] = "png",
+    scale: Annotated[int, Query(ge=1, le=40, description="Pixels per module")] = 10,
+    download: bool = False,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    link = await links_service.get_owned_link(db, user, link_id)
+    short_url = f"{_base_url().rstrip('/')}/{link.short_code}"
+    image = qr_service.render_qr(short_url, fmt=fmt, scale=scale, filename_stem=link.short_code)
+    disposition = "attachment" if download else "inline"
+    return Response(
+        content=image.content,
+        media_type=image.media_type,
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{image.filename}"',
+            "Cache-Control": "private, max-age=3600",
+        },
     )
