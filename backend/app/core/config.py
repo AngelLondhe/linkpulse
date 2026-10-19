@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     worker_block_timeout_seconds: int = Field(default=1, ge=1)
     worker_max_backoff_seconds: float = 30.0
 
+    # Google Safe Browsing (optional). Without a key, destination URLs are not checked.
+    safe_browsing_api_key: SecretStr | None = None
+    safe_browsing_timeout_seconds: float = 2.0
+
     # Geo lookup (MaxMind GeoLite2 City). Missing file => country/city "Unknown".
     geoip_db_path: str = "data/GeoLite2-City.mmdb"
 

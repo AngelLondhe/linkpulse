@@ -12,11 +12,13 @@ from app.core.errors import register_exception_handlers
 from app.core.redis import redis_client
 from app.db.session import engine
 from app.routers import auth, health, links, redirect
+from app.services import safe_browsing
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
+    await safe_browsing.close()
     await redis_client.aclose()
     await engine.dispose()
 

@@ -13,6 +13,7 @@ from app.routers.deps import get_current_user, rate_limit_per_user
 from app.schemas.links import LinkCreate, LinkPage, LinkRead, LinkUpdate
 from app.schemas.stats import LinkStats
 from app.services import links_service, qr_service, rate_limiter, stats_service
+from app.services.safe_browsing import URLSafetyChecker, get_url_checker
 
 router = APIRouter(prefix="/api/links", tags=["links"])
 
@@ -34,8 +35,9 @@ async def create_link(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
+    checker: URLSafetyChecker | None = Depends(get_url_checker),
 ) -> LinkRead:
-    link = await links_service.create_link(db, redis, user, body)
+    link = await links_service.create_link(db, redis, user, body, checker)
     return LinkRead.from_model(link, total_clicks=0, base_url=_base_url())
 
 
@@ -78,8 +80,9 @@ async def update_link(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
+    checker: URLSafetyChecker | None = Depends(get_url_checker),
 ) -> LinkRead:
-    link = await links_service.update_link(db, redis, user, link_id, body)
+    link = await links_service.update_link(db, redis, user, link_id, body, checker)
     clicks = await links_service.count_clicks(db, link.id)
     return LinkRead.from_model(link, total_clicks=clicks, base_url=_base_url())
 

@@ -21,6 +21,7 @@ from app.core.security import hash_password
 from app.models import Click, Link, User
 from app.schemas.links import LinkCreate, LinkUpdate
 from app.services import click_limits, link_cache
+from app.services.safe_browsing import URLSafetyChecker
 from app.utils.aliases import InvalidAliasError, validate_alias
 from app.utils.db_errors import is_unique_violation
 from app.utils.shortcode import generate_short_code
@@ -42,6 +43,19 @@ def validate_destination(url: str) -> str:
         return validate_target_url(url, own_hosts)
     except InvalidURLError as exc:
         raise ValidationError(str(exc), code="invalid_url") from exc
+
+
+async def ensure_not_malicious(url: str, checker: URLSafetyChecker | None) -> None:
+    """Reject URLs flagged by Google Safe Browsing (422 ``unsafe_url``), when configured."""
+    if checker is None:
+        return
+    threats = await checker.threats(url)
+    if threats:
+        raise ValidationError(
+            "This URL is flagged as unsafe by Google Safe Browsing",
+            details={"threats": threats},
+            code="unsafe_url",
+        )
 
 
 def _validated_expiry(expires_at: datetime | None) -> datetime | None:
@@ -66,7 +80,13 @@ async def _insert(db: AsyncSession, redis: Redis, link: Link) -> Link:
     return link
 
 
-async def create_link(db: AsyncSession, redis: Redis, owner: User, data: LinkCreate) -> Link:
+async def create_link(
+    db: AsyncSession,
+    redis: Redis,
+    owner: User,
+    data: LinkCreate,
+    checker: URLSafetyChecker | None = None,
+) -> Link:
     """Create a short link, with a custom alias or a random 7-char Base62 code.
 
     Custom aliases: a unique-index violation means the alias is taken (409, no retry).
@@ -77,6 +97,7 @@ async def create_link(db: AsyncSession, redis: Redis, owner: User, data: LinkCre
     """
     destination = validate_destination(data.url)
     expires_at = _validated_expiry(data.expires_at)
+    await ensure_not_malicious(destination, checker)
     password_hash = hash_password(data.password) if data.password is not None else None
     # Read before any rollback: a rollback expires every object in the session, incl. `owner`.
     owner_id = owner.id
@@ -180,7 +201,12 @@ async def count_clicks(db: AsyncSession, link_id: int) -> int:
 
 
 async def update_link(
-    db: AsyncSession, redis: Redis, owner: User, link_id: int, changes: LinkUpdate
+    db: AsyncSession,
+    redis: Redis,
+    owner: User,
+    link_id: int,
+    changes: LinkUpdate,
+    checker: URLSafetyChecker | None = None,
 ) -> Link:
     """Apply a partial update to an owned link, then invalidate its cached redirect entry so
     the change takes effect immediately. For ``expires_at`` / ``max_clicks`` an explicit
@@ -188,7 +214,9 @@ async def update_link(
     link = await get_owned_link(db, owner, link_id)
     provided = changes.model_fields_set
     if changes.url is not None:
-        link.original_url = validate_destination(changes.url)
+        destination = validate_destination(changes.url)
+        await ensure_not_malicious(destination, checker)
+        link.original_url = destination
     if changes.is_active is not None:
         link.is_active = changes.is_active
     if "expires_at" in provided:
