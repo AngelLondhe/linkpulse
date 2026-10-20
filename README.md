@@ -4,8 +4,8 @@
 
 **Live demo:** _coming soon: `https://<your-frontend>.vercel.app`_ (sign in with **Explore the demo account**)
 
-[![CI](https://github.com/<your-github-username>/linkpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-github-username>/linkpulse/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/<your-github-username>/linkpulse/graph/badge.svg)](https://codecov.io/gh/<your-github-username>/linkpulse)
+[![CI](https://github.com/AngelLondhe/linkpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/AngelLondhe/linkpulse/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/AngelLondhe/linkpulse/graph/badge.svg)](https://codecov.io/gh/AngelLondhe/linkpulse)
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 ![TypeScript](https://img.shields.io/badge/typescript-strict-blue)
 
