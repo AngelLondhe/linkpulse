@@ -5,7 +5,8 @@ With Docker:                     docker compose exec api python -m scripts.seed
 
 Re-running is safe: the demo user (and everything it owns) is deleted and recreated.
 Clicks are inserted directly (bypassing the queue) so the dashboard is populated instantly.
-The RNG is seeded, so every run produces the same data.
+The RNG is seeded, so runs on the same day produce the same data (the 90-day window and
+weekday rhythm are relative to today, so totals shift slightly from day to day).
 """
 
 import argparse
